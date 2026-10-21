@@ -9,9 +9,11 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from . import __version__
 
 BEGIN = "<!-- shared-project-context:begin sha256="
 END = "<!-- shared-project-context:end -->"
+SETUP_CLIENTS = ("claude", "codex", "hermes", "gemini", "pi", "opencode")
 
 
 class InstallError(ValueError):
@@ -34,7 +36,7 @@ def atomic_text(path, text, mode=0o600):
             os.unlink(name)
 
 
-def manage_block(path, body):
+def manage_block(path, body, dry_run=False):
     path = Path(path)
     old = path.read_text() if path.exists() else ""
     pattern = re.compile(
@@ -58,7 +60,7 @@ def manage_block(path, body):
         if matches
         else old + new
     )
-    if text != old:
+    if text != old and not dry_run:
         mode = (path.stat().st_mode & 0o777) if path.exists() else 0o600
         atomic_text(path, text, mode)
     return {
@@ -68,14 +70,29 @@ def manage_block(path, body):
     }
 
 
-def manage_claude_hook(path, launcher, remove=False):
+def manage_claude_hook(path, launcher, remove=False, client="claude", dry_run=False):
     path = Path(path)
     config = json.loads(path.read_text()) if path.exists() else {}
     hooks = config.setdefault("hooks", {})
-    groups = hooks.setdefault("UserPromptSubmit", [])
-    command = shlex.quote(str(launcher)) + " hook"
-    owned = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+    event = "BeforeAgent" if client == "gemini" else "UserPromptSubmit"
+    groups = hooks.setdefault(event, [])
+    command = (
+        shlex.quote(str(launcher))
+        + " hook"
+        + (" --client gemini" if client == "gemini" else "")
+    )
+    owned = {
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+                "timeout": 10000 if client == "gemini" else 10,
+            }
+        ]
+    }
     found = [g for g in groups if g == owned]
+    if len(found) > 1:
+        raise InstallError("duplicate_managed_hooks")
     if any(
         any(h.get("command") == command for h in g.get("hooks", [])) and g != owned
         for g in groups
@@ -85,6 +102,8 @@ def manage_claude_hook(path, launcher, remove=False):
         groups[:] = [g for g in groups if g != owned]
     elif not found:
         groups.append(owned)
+    if dry_run:
+        return
     atomic_text(
         path,
         json.dumps(config, indent=2) + "\n",
@@ -100,6 +119,13 @@ def native_environment(home):
             CODEX_HOME=str(home / ".codex"),
             CLAUDE_CONFIG_DIR=str(home / ".claude"),
             HERMES_HOME=str(home / ".hermes"),
+            GEMINI_CLI_HOME=str(home),
+            PI_CODING_AGENT_DIR=str(home / ".pi/agent"),
+            XDG_CONFIG_HOME=str(home / ".config"),
+            XDG_DATA_HOME=str(home / ".local/share"),
+            XDG_CACHE_HOME=str(home / ".cache"),
+            XDG_STATE_HOME=str(home / ".local/state"),
+            OPENCODE_CONFIG_DIR=str(home / ".config/opencode"),
         )
     return env
 
@@ -140,14 +166,31 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
 
     home = Path(home or Path.home()).expanduser().resolve()
     state = Path(state or default_home()).expanduser().resolve()
-    clients = clients or [c for c in ("claude", "codex", "hermes") if shutil.which(c)]
-    if not set(clients) <= {"claude", "codex", "hermes"}:
+    clients = (
+        [c for c in SETUP_CLIENTS if shutil.which(c)] if clients is None else clients
+    )
+    if not set(clients) <= set(SETUP_CLIENTS):
         raise InstallError("unknown_client")
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     manifest_path = state / "installation.json"
     previous = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     if previous and not previous.get("active", True) and not reactivate:
         raise InstallError("installation_disabled_use_explicit_reinstall")
+    if previous and not previous.get("active", True) and reactivate:
+        previous = {
+            key: value
+            for key, value in previous.items()
+            if key
+            not in {
+                "native",
+                "clients",
+                "instructions",
+                "connections",
+                "pending_clients",
+                "claude_hook",
+                "gemini_hook",
+            }
+        }
     source = Path(__file__).parent
     files = {p.name: p.read_text() for p in source.glob("*.py")}
     code_hash = hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
@@ -181,6 +224,9 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
     claude_root = Path(env.get("CLAUDE_CONFIG_DIR", str(home / ".claude")))
     codex_root = Path(env.get("CODEX_HOME", str(home / ".codex")))
     hermes_root = Path(env.get("HERMES_HOME", str(home / ".hermes")))
+    gemini_root = Path(env.get("GEMINI_CLI_HOME", str(home))) / ".gemini"
+    pi_root = Path(env.get("PI_CODING_AGENT_DIR", str(home / ".pi/agent")))
+    opencode_root = Path(env.get("XDG_CONFIG_HOME", str(home / ".config"))) / "opencode"
     paths = {
         "claude": claude_root / "CLAUDE.md",
         "codex": codex_root
@@ -189,7 +235,46 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
             if (codex_root / "AGENTS.override.md").exists()
             else "AGENTS.md"
         ),
+        "gemini": gemini_root / "GEMINI.md",
+        "pi": pi_root / "AGENTS.md",
+        "opencode": opencode_root / "AGENTS.md",
     }
+    from .clients import connection, manage_json_entry, NAME
+
+    configs = {
+        "gemini": (gemini_root / "settings.json", ["mcpServers", NAME]),
+        "pi": (pi_root / "mcp.json", ["mcpServers", NAME]),
+        "opencode": (opencode_root / "opencode.json", ["mcp", NAME]),
+    }
+    pending_connections = {}
+    if native:
+        for client in clients:
+            if client not in configs:
+                continue
+            path, keys = configs[client]
+            if client == "opencode" and (
+                (opencode_root / "opencode.jsonc").exists()
+                or (
+                    home == Path.home().resolve()
+                    and any(
+                        env.get(key)
+                        for key in (
+                            "OPENCODE_CONFIG",
+                            "OPENCODE_CONFIG_CONTENT",
+                            "OPENCODE_CONFIG_DIR",
+                        )
+                    )
+                )
+            ):
+                raise InstallError("opencode_config_precedence_use_connect_recipe")
+            config = connection(client, str(launcher))["configuration"]
+            entry = config[keys[0]][keys[1]]
+            owned = previous.get("connections", {}).get(client)
+            pending_connections[client] = manage_json_entry(
+                path, keys, entry, previous=owned, dry_run=True
+            )
+            if client == "gemini":
+                manage_claude_hook(path, launcher, client="gemini", dry_run=True)
     instructions = (
         "# Shared project context\n"
         + GUIDANCE
@@ -225,6 +310,7 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
         "clients": sorted(set(previous.get("clients", [])) | set(clients)),
         "native": previous.get("native", []),
         "instructions": previous.get("instructions", {}),
+        "connections": previous.get("connections", {}),
     }
     for client in clients:
         if client in paths:
@@ -236,7 +322,15 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
     env = native_environment(home)
     if native:
         for client in clients:
-            if client == "hermes":
+            if client in pending_connections:
+                receipt = pending_connections[client]
+                manifest["connections"][client] = manage_json_entry(
+                    receipt["path"],
+                    receipt["keys"],
+                    receipt["entry"],
+                    previous=previous.get("connections", {}).get(client),
+                )
+            elif client == "hermes":
                 # Native plugin exposes the same tools plus per-turn context; no duplicate MCP server.
                 plug = hermes_root / "plugins/shared-project-context"
                 manifest["plugin_dir"] = str(plug)
@@ -252,7 +346,7 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
                 old_files = previous.get("plugin_hashes", {})
                 for name, text in {
                     "__init__.py": plugin_text,
-                    "plugin.yaml": 'name: shared-project-context\nversion: "0.1.0"\ndescription: Local shared project awareness\n',
+                    "plugin.yaml": f'name: shared-project-context\nversion: "{__version__}"\ndescription: Local shared project awareness\n',
                 }.items():
                     f = plug / name
                     if f.exists() and (
@@ -301,6 +395,10 @@ def setup(home=None, state=None, clients=None, native=True, reactivate=False):
                 settings = claude_root / "settings.json"
                 manage_claude_hook(settings, launcher)
                 manifest["claude_hook"] = str(settings)
+            if client == "gemini":
+                settings = gemini_root / "settings.json"
+                manage_claude_hook(settings, launcher, client="gemini")
+                manifest["gemini_hook"] = str(settings)
             if client not in manifest["native"]:
                 manifest["native"].append(client)
             manifest["pending_clients"] = [
@@ -317,16 +415,49 @@ def uninstall(home=None, state=None, native=True):
     state = Path(state or default_home()).resolve()
     f = state / "installation.json"
     manifest = json.loads(f.read_text())
+    if not manifest.get("active", True):
+        return {"active": False, "data_retained": True, "runtime_retained": True}
     env = native_environment(home)
+    # Fail closed before removing instructions if an owned component was changed.
+    for path in manifest.get("instructions", {}).values():
+        manage_block(Path(path), None, dry_run=True)
+    if native:
+        from .clients import manage_json_entry
+
+        for owned in manifest.get("connections", {}).values():
+            manage_json_entry(
+                owned["path"], owned["keys"], None, previous=owned, dry_run=True
+            )
+        for client in ("claude", "gemini"):
+            if manifest.get(client + "_hook"):
+                manage_claude_hook(
+                    manifest[client + "_hook"],
+                    manifest["launcher"],
+                    remove=True,
+                    client=client,
+                    dry_run=True,
+                )
     for client, path in manifest.get("instructions", {}).items():
         manage_block(Path(path), None)
     if native:
+        if manifest.get("gemini_hook"):
+            manage_claude_hook(
+                manifest["gemini_hook"],
+                manifest["launcher"],
+                remove=True,
+                client="gemini",
+            )
         if manifest.get("claude_hook"):
             manage_claude_hook(
                 manifest["claude_hook"], manifest["launcher"], remove=True
             )
         for client in manifest.get("native", []):
-            if client == "hermes":
+            if client in manifest.get("connections", {}):
+                from .clients import manage_json_entry
+
+                owned = manifest["connections"][client]
+                manage_json_entry(owned["path"], owned["keys"], None, previous=owned)
+            elif client == "hermes":
                 run_native(
                     ["hermes", "plugins", "disable", "shared-project-context"], env
                 )

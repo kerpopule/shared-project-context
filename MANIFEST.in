@@ -1,7 +1,9 @@
 include LICENSE README.md bootstrap.py VERIFICATION.md SECURITY.md
 recursive-include shared_context *.py
 recursive-include tests *.py
-recursive-include tools *.py
+recursive-include tests_http *.py
+recursive-include tools *.py *.mjs
+recursive-include docs *.md
 exclude CHECKPOINT.md
 exclude .DS_Store
 prune .github

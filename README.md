@@ -4,10 +4,17 @@ A small local coordination layer for agents that work on the same projects. It s
 
 ## Quick start
 
+This v0.2.0 interoperability release adds Gemini CLI,
+modern Pi and OpenCode adapters; project-scoped MCP tools/resources/prompts;
+and a tested room-host bridge. See [universal compatibility and cloud limits](docs/UNIVERSAL.md)
+and [room integration](docs/ROOMS.md). Optional [authenticated loopback HTTP](docs/HTTP.md)
+is available for separately qualified hosts. This is not a claim that Grok Bot,
+dots or a shipped Rooms app has already connected.
+
 Requires Python 3.9+ and an installed client. Git is optional for non-code initiatives.
 
 ```sh
-git clone https://github.com/kerpopule/shared-project-context.git
+git clone --branch v0.2.0 https://github.com/kerpopule/shared-project-context.git
 cd shared-project-context
 python3 bootstrap.py
 ```
@@ -18,7 +25,7 @@ This connects locally installed supported clients without uploading your context
 python3 bootstrap.py
 ```
 
-This detects Claude Code, Codex and Hermes on PATH, installs a private runtime outside their app bundles, adds supported client integrations and preserves unrelated settings. No pip, API key, cloud account, public listener, scheduled job or always-on daemon is required. For selected clients only:
+This detects Claude Code, Codex, Hermes, Gemini CLI, Pi and OpenCode on PATH, installs a private runtime outside their app bundles, adds supported client integrations and preserves unrelated settings. No pip, API key, cloud account, public listener, scheduled job or always-on daemon is required. For selected clients only:
 
 ```sh
 python3 bootstrap.py setup --clients claude,codex

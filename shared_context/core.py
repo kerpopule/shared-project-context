@@ -165,6 +165,10 @@ class Store:
             workspace=work,
             revision=row["revision"],
             snapshot=snap,
+            observation_source={
+                "kind": "server_local_filesystem",
+                "remote_checkout_observed": False,
+            },
             unexplained_drift=bool(previous and previous[0] != snap["fingerprint"]),
             baseline_known=previous is not None,
             leases=leases,

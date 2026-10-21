@@ -152,7 +152,11 @@ def snapshot(workspace):
             head=head,
             branch=branch,
             dirty=bool(status),
-            changed_paths=status.split("\0")[:100],
+            changed_paths=[entry for entry in status.split("\0") if entry][:100],
+            changed_paths_truncated=len(
+                [entry for entry in status.split("\0") if entry]
+            )
+            > 100,
             files_checked=len(hashes),
             complete=not issues,
             issues=sorted(set(issues)),

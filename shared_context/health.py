@@ -110,8 +110,25 @@ def doctor(state=None, native=True):
                 and hashlib.sha256((plug / name).read_bytes()).hexdigest() == digest
                 for name, digest in manifest["plugin_hashes"].items()
             )
+        for client, owned in manifest.get("connections", {}).items():
+            value = json.loads(Path(owned["path"]).read_text())
+            for key in owned["keys"]:
+                value = value[key]
+            checks[client + "_owned_connection"] = value == owned["entry"]
+        if manifest.get("gemini_hook"):
+            import shlex
+
+            config = json.loads(Path(manifest["gemini_hook"]).read_text())
+            command = shlex.quote(str(launcher)) + " hook --client gemini"
+            checks["gemini_before_agent_hook"] = any(
+                hook.get("command") == command
+                for group in config.get("hooks", {}).get("BeforeAgent", [])
+                for hook in group.get("hooks", [])
+            )
         if native:
             for client in manifest.get("native", []):
+                if client in manifest.get("connections", {}):
+                    continue
                 if client == "hermes":
                     p = subprocess.run(
                         ["hermes", "plugins", "list", "--user", "--json"],
@@ -141,7 +158,15 @@ def doctor(state=None, native=True):
             "checks": checks,
             "scope": "local configuration, integrity and MCP transport only; not model behavior or desktop/remote coverage",
         }
-    except (ValueError, OSError, KeyError, sqlite3.Error, subprocess.TimeoutExpired):
+    except (
+        ValueError,
+        TypeError,
+        AttributeError,
+        OSError,
+        KeyError,
+        sqlite3.Error,
+        subprocess.TimeoutExpired,
+    ):
         return {
             "ok": False,
             "checks": checks,
