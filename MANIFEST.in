@@ -1,0 +1,11 @@
+include LICENSE README.md bootstrap.py VERIFICATION.md SECURITY.md
+recursive-include shared_context *.py
+recursive-include tests *.py
+recursive-include tools *.py
+exclude CHECKPOINT.md
+exclude .DS_Store
+prune .github
+prune build
+prune dist
+prune .venv
+global-exclude __pycache__ *.py[cod] *.sqlite3* installation.json .env*
