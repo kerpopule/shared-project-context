@@ -131,10 +131,12 @@ def connection(
             "Use Apps > MCP > Command on the conversation computer. Enter command and arguments from server below; this object is not a Grok import file.",
             "A cloud conversation computer cannot read a Mac path. Install on that computer, or use an explicitly authorized private bridge to the shared host.",
             "Remote HTTPS connectors require separate authenticated deployment; this package does not publish an endpoint.",
+            "Team Bot setup changes can reach every teammate. A Command runs on each conversation's computer; do not put credentials in argv or grant team-wide access to private project context without explicit sharing approval.",
         ]
     elif client == "dots":
         requirements += [
-            "For local work, connect the computer and configure the MCP server in its Codex client; an approved dot task must select that computer.",
+            "In the ChatGPT app on the chosen computer, open the exact dot profile > Computers > Your computer > Allow access, and confirm. This is a separate persistent permission from Codex computer access or Work Sync.",
+            "Configure scoped MCP in that computer's Codex client, then verify discovery and project reads in an actual dot-created local Codex task. A Codex transport probe alone does not qualify the dot connection.",
             "Cloud-only and remote plugin access need a separately deployed authenticated HTTPS MCP server and account setup. Local stdio is not a cloud connector.",
             "No dot account or cloud execution is inferred from generating this recipe.",
         ]

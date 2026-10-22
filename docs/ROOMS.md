@@ -53,6 +53,10 @@ A long-lived stdio integration can pass the scope to shared_context.mcp.serve. A
 
 The bridge itself never launches an agent, monitors a model, imports private chats, or converts greetings into work.
 
+## Development host command
+
+The development branch adds an owner-configured `room-context` command. See [ROOM-HOST-COMMAND.md](ROOM-HOST-COMMAND.md) for the grant schema, host subprocess contract, revocation/history rules and explicit qualification limits. This does not change the shipped v0.2.0 support claim.
+
 ## Verification boundary
 
 The Python bridge is implemented and tested with synthetic multi-member turns, shared decisions, lease conflicts, actor spoofing rejection, denied projects, read-only writes, failed receipts, stale cursors and packet limits.

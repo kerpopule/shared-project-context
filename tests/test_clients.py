@@ -134,6 +134,22 @@ class UniversalClientTest(unittest.TestCase):
             self.assertEqual(output["hookEventName"], "BeforeAgent")
             self.assertIn("Fresh project decision", output["additionalContext"])
 
+    def test_cloud_recipes_preserve_account_and_team_sharing_boundaries(self):
+        from shared_context.clients import connection
+
+        dots = connection(
+            "dots", "/absolute/shared-context", project="demo", read_only=True
+        )
+        instructions = " ".join(dots["requirements"])
+        self.assertIn("separate persistent permission", instructions)
+        self.assertIn("Codex transport probe alone does not qualify", instructions)
+        grok = connection(
+            "grok-bot", "/absolute/shared-context", project="demo", read_only=True
+        )
+        self.assertIn("every teammate", " ".join(grok["requirements"]))
+        self.assertFalse(dots["verified_in_vendor_runtime"])
+        self.assertFalse(grok["verified_in_vendor_runtime"])
+
     def test_cli_connection_is_non_mutating_and_machine_readable(self):
         import subprocess
         import sys

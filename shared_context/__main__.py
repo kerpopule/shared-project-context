@@ -52,8 +52,26 @@ def main():
         "--ssh",
         help="Generate stdio-over-SSH using an existing authorized host; does not connect.",
     )
+    room = sub.add_parser(
+        "room-context", help="Read an explicit owner-configured room grant."
+    )
+    for field in ("config", "host", "room", "member", "session"):
+        room.add_argument("--" + field, required=True)
     args = parser.parse_args()
     try:
+        if args.command == "room-context":
+            from .room_host import room_context
+
+            result = room_context(
+                args.config, args.host, args.room, args.member, args.session
+            )
+            # Hosts need the bounded prompt, not a duplicate serialized packet.
+            print(
+                json.dumps(
+                    {key: result[key] for key in ("enabled", "context", "scope")}
+                )
+            )
+            return 0
         if args.command == "serve-http":
             from .http_transport import run_http
 
